@@ -1,0 +1,436 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>循環對抗猜題系統</title>
+    
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.js"></script>
+    
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;700;900&display=swap');
+
+        body {
+            font-family: 'Noto Sans TC', sans-serif;
+            /* 100dvh 避免手機網址列裁切，設定為 flex 容器 */
+            height: 100dvh;
+            margin: 0;
+            background-color: #f1f5f9; /* tailwind slate-100 */
+            overflow: hidden; /* 隱藏全局滾動，由內部容器處理 */
+            /* 防呆機制：禁止文字選取與雙擊放大 */
+            user-select: none;
+            -webkit-user-select: none;
+            touch-action: manipulation;
+        }
+
+        /* 自定義按鈕按壓回饋 */
+        .btn-press {
+            transition: transform 0.1s cubic-bezier(0.4, 0, 0.2, 1), background-color 0.1s;
+        }
+        .btn-press:active {
+            transform: scale(0.95);
+        }
+        .btn-press:disabled {
+            transform: none;
+            opacity: 0.5;
+            cursor: not-allowed;
+            filter: grayscale(100%);
+        }
+
+        /* 隱藏滾動條但允許滾動 (給需要的區塊) */
+        .no-scrollbar::-webkit-scrollbar {
+            display: none;
+        }
+        .no-scrollbar {
+            -ms-overflow-style: none;
+            scrollbar-width: none;
+        }
+
+        /* 確保字體粗細正確渲染 */
+        .font-black { font-weight: 900; }
+    </style>
+</head>
+<body class="flex flex-col text-slate-800">
+
+    <div id="app" class="relative w-full h-full max-w-2xl mx-auto bg-white shadow-2xl flex flex-col overflow-hidden">
+        
+        <!-- ================= HOME VIEW ================= -->
+        <div id="home-view" class="flex-1 flex flex-col p-6 overflow-y-auto no-scrollbar">
+            <header class="text-center mb-8 mt-4">
+                <h1 class="text-4xl font-black text-indigo-900 tracking-wider mb-2">循環對抗猜題</h1>
+                <p class="text-slate-500 font-bold">每輪 5 分鐘 · 無限歡樂</p>
+            </header>
+
+            <!-- 記分板 -->
+            <div class="bg-slate-50 rounded-2xl p-4 shadow-inner mb-8 border border-slate-100">
+                <h2 class="text-lg font-bold text-slate-600 mb-4 text-center">目前總分</h2>
+                <div class="flex justify-between items-center space-x-4">
+                    <div class="flex-1 bg-rose-100 rounded-xl p-4 text-center shadow-sm">
+                        <div class="text-rose-600 font-bold text-sm mb-1">一科</div>
+                        <div class="text-3xl font-black text-rose-700" id="score-1">0</div>
+                    </div>
+                    <div class="flex-1 bg-teal-100 rounded-xl p-4 text-center shadow-sm">
+                        <div class="text-teal-600 font-bold text-sm mb-1">二科</div>
+                        <div class="text-3xl font-black text-teal-700" id="score-2">0</div>
+                    </div>
+                    <div class="flex-1 bg-indigo-100 rounded-xl p-4 text-center shadow-sm">
+                        <div class="text-indigo-600 font-bold text-sm mb-1">三科</div>
+                        <div class="text-3xl font-black text-indigo-700" id="score-3">0</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="flex-1 flex flex-col justify-center">
+                <h3 class="text-xl font-bold text-center mb-6 text-slate-700">請主持人選擇由哪一科 <span class="text-amber-500">先發表演</span></h3>
+                
+                <div class="space-y-4">
+                    <button onclick="startGame(1)" class="btn-press w-full bg-gradient-to-r from-rose-500 to-rose-400 text-white rounded-2xl p-5 shadow-lg shadow-rose-200 flex justify-between items-center">
+                        <span class="text-2xl font-black">一科上台表演</span>
+                        <span class="bg-white/20 px-3 py-1 rounded-full text-sm font-bold border border-white/30">二科猜題拿分</span>
+                    </button>
+                    
+                    <button onclick="startGame(2)" class="btn-press w-full bg-gradient-to-r from-teal-500 to-teal-400 text-white rounded-2xl p-5 shadow-lg shadow-teal-200 flex justify-between items-center">
+                        <span class="text-2xl font-black">二科上台表演</span>
+                        <span class="bg-white/20 px-3 py-1 rounded-full text-sm font-bold border border-white/30">三科猜題拿分</span>
+                    </button>
+
+                    <button onclick="startGame(3)" class="btn-press w-full bg-gradient-to-r from-indigo-500 to-indigo-400 text-white rounded-2xl p-5 shadow-lg shadow-indigo-200 flex justify-between items-center">
+                        <span class="text-2xl font-black">三科上台表演</span>
+                        <span class="bg-white/20 px-3 py-1 rounded-full text-sm font-bold border border-white/30">一科猜題拿分</span>
+                    </button>
+                </div>
+                
+                <div class="mt-8 text-center text-sm text-slate-400 font-bold">
+                    題庫剩餘：<span id="q-remaining" class="text-slate-600">120</span> 題
+                </div>
+            </div>
+        </div>
+
+        <!-- ================= GAME VIEW ================= -->
+        <div id="game-view" class="hidden flex-1 flex flex-col bg-slate-50 relative">
+            <!-- 頂部資訊列 -->
+            <div class="flex justify-between items-center p-4 bg-white shadow-sm z-10">
+                <button onclick="requestEndEarly()" class="btn-press px-4 py-2 bg-slate-200 text-slate-700 rounded-lg font-bold text-sm flex items-center gap-1">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                    提早結束
+                </button>
+                <div id="timer-display" class="text-4xl font-black tabular-nums tracking-wider text-slate-800">05:00</div>
+                <div class="text-right flex flex-col items-end">
+                    <div class="text-xs font-bold text-slate-400">剩餘跳過</div>
+                    <div id="skips-display" class="text-lg font-black text-amber-500 bg-amber-50 px-2 rounded-md">5 次</div>
+                </div>
+            </div>
+
+            <!-- 狀態指示條 -->
+            <div id="round-status-banner" class="w-full text-center py-2 text-white font-bold text-sm shadow-md transition-colors duration-300">
+                <!-- 動態填入如：一科 演 ➔ 二科 猜 -->
+            </div>
+
+            <!-- 題目顯示區 -->
+            <div class="flex-1 flex items-center justify-center p-6">
+                <div class="w-full bg-white rounded-3xl shadow-xl aspect-[4/3] flex flex-col items-center justify-center p-8 border-4 border-slate-100 relative overflow-hidden">
+                    <!-- 裝飾背景圈 -->
+                    <div class="absolute -top-10 -right-10 w-32 h-32 bg-slate-50 rounded-full opacity-50 pointer-events-none"></div>
+                    <div class="absolute -bottom-10 -left-10 w-40 h-40 bg-slate-50 rounded-full opacity-50 pointer-events-none"></div>
+                    
+                    <h2 id="current-question" class="text-5xl md:text-7xl font-black text-center text-slate-800 leading-tight tracking-widest z-10 break-keep">
+                        準備中...
+                    </h2>
+                </div>
+            </div>
+
+            <!-- 控制按鈕區 -->
+            <div class="p-4 bg-white shadow-[0_-10px_30px_-15px_rgba(0,0,0,0.1)] rounded-t-3xl pb-safe">
+                <div class="flex gap-3 mb-3">
+                    <button id="btn-foul" onclick="handleFoul()" class="btn-press flex-1 py-4 bg-amber-100 text-amber-700 rounded-xl font-bold text-lg border-2 border-amber-200 active:bg-amber-200 flex flex-col items-center justify-center leading-tight">
+                        <span>無痛犯規</span>
+                        <span class="text-xs opacity-75 font-normal">換題不扣分/次數</span>
+                    </button>
+                    <button id="btn-skip" onclick="handleSkip()" class="btn-press flex-1 py-4 bg-slate-200 text-slate-700 rounded-xl font-bold text-lg border-2 border-slate-300 active:bg-slate-300 flex flex-col items-center justify-center leading-tight">
+                        <span>跳過 (-1次)</span>
+                        <span class="text-xs opacity-75 font-normal">限用 5 次</span>
+                    </button>
+                </div>
+                <button id="btn-correct" onclick="handleCorrect()" class="btn-press w-full py-5 bg-gradient-to-b from-green-400 to-green-500 text-white rounded-2xl font-black text-3xl shadow-[0_6px_0_#15803d] active:shadow-[0_0px_0_#15803d] active:translate-y-[6px] transition-all flex items-center justify-center gap-2">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-8 w-8" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7" /></svg>
+                    答對 +1 分
+                </button>
+            </div>
+        </div>
+
+        <!-- 自訂彈出視窗 (Modal) -->
+        <div id="custom-modal" class="hidden absolute inset-0 bg-slate-900/60 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
+            <div class="bg-white rounded-3xl p-6 w-full max-w-sm shadow-2xl scale-100 transition-transform">
+                <div class="w-16 h-16 bg-rose-100 text-rose-500 rounded-full flex items-center justify-center mx-auto mb-4">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-8 w-8" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>
+                </div>
+                <h3 class="text-xl font-black text-center text-slate-800 mb-2">確定提早結束？</h3>
+                <p class="text-center text-slate-500 mb-6 font-bold">這回合的時間將會立刻歸零，不再計分。</p>
+                <div class="flex gap-3">
+                    <button onclick="closeModal()" class="btn-press flex-1 py-3 bg-slate-100 text-slate-700 font-bold rounded-xl active:bg-slate-200">取消</button>
+                    <button onclick="confirmEndEarly()" class="btn-press flex-1 py-3 bg-rose-500 text-white font-bold rounded-xl active:bg-rose-600 shadow-md shadow-rose-200">確定結束</button>
+                </div>
+            </div>
+        </div>
+
+    </div>
+
+    <script>
+        // --- 題庫資料 (120題) ---
+        const initialQuestions = [
+            // 現代生活與科技社群 40 題
+            "電視機", "電冰箱", "腳踏車", "公共汽車", "火車", "行動電源", "臉書直播", "股票貼圖", "外送平台", "雲端硬碟",
+            "智慧型手錶", "無線基地台", "雙螢幕", "網路塞車", "藍牙喇叭", "條碼掃描器", "平板電腦", "數位轉型", "網路簡訊", "電子發票",
+            "有線電視", "語音助理", "導航系統", "行車紀錄器", "網路購物", "行動支付", "密碼鎖", "記憶卡", "自拍棒", "投影機",
+            "快充線", "智慧電視", "遊戲主機", "網路直播主", "虛擬實境眼鏡", "動態貼圖", "電子書", "線上課程", "洗衣機", "網路流量",
+            // 辦公室日常與電信職人 40 題
+            "碎紙機", "識別證", "麥克風", "薪資單", "公文系統", "加班費", "視訊會議", "悠遊卡", "辦公椅", "訂書機",
+            "打孔機", "碎紙條", "辦公桌", "鍵盤", "滑鼠", "螢光筆", "便條紙", "白板筆", "打卡鐘", "公事包",
+            "公文夾", "印表機", "影印紙", "識別證帶子", "會議室", "茶水間", "飲水機", "微波爐", "咖啡豆", "便當盒",
+            "環保杯", "垃圾桶", "盆栽", "靠墊", "電風扇", "冷氣遙控器", "全體同仁", "年終獎金", "尾牙抽獎", "請假單",
+            // 生活美食與休閒娛樂 40 題
+            "珍珠奶茶", "烤箱", "掃地機器人", "洗碗精", "口罩", "牙膏", "計算機", "跑步機", "臭豆腐", "滷肉飯",
+            "烤鴨點心", "四川料理", "涮涮鍋", "炸豬排", "迴轉壽司", "划船機", "羅漢果糖", "奇亞籽", "滑雪場", "溫泉旅館",
+            "演唱會", "便利商店", "巧克力", "冰淇淋", "衛生紙", "釣魚竿", "露營帳篷", "安全帽", "雨衣", "保熱壺",
+            "太陽眼鏡", "運動鞋", "帆布鞋", "後背包", "旅行箱", "吹風機", "電動牙刷", "按摩椅", "體重計", "指甲剪"
+        ];
+
+        // 深拷貝一份做為遊戲用題庫
+        let questionBank = [...initialQuestions];
+
+        // --- 遊戲狀態 ---
+        const ROUND_TIME = 300; // 5 分鐘 = 300 秒
+        const MAX_SKIPS = 5;
+        
+        let scores = { 1: 0, 2: 0, 3: 0 };
+        let currentPerformingTeam = null;
+        let currentGuessingTeam = null;
+        let timeLeft = 0;
+        let skipsLeft = 0;
+        let timerInterval = null;
+        let isPlaying = false;
+        
+        // --- Tone.js 音效設定 ---
+        let synth;
+        let isAudioInitialized = false;
+
+        async function initAudio() {
+            if (isAudioInitialized) return;
+            await Tone.start();
+            synth = new Tone.PolySynth(Tone.Synth).toDestination();
+            // 設定音量避免太大聲
+            synth.volume.value = -6; 
+            isAudioInitialized = true;
+        }
+
+        function playTickSound() {
+            if (!isAudioInitialized) return;
+            // 倒數 10 秒的滴滴聲 (高音短促)
+            synth.triggerAttackRelease("C6", "32n");
+        }
+
+        function playAlarmSound() {
+            if (!isAudioInitialized) return;
+            // 結束鬧鐘聲 (類似三連音警告)
+            const now = Tone.now();
+            synth.triggerAttackRelease("E5", "8n", now);
+            synth.triggerAttackRelease("E5", "8n", now + 0.2);
+            synth.triggerAttackRelease("E5", "8n", now + 0.4);
+            synth.triggerAttackRelease("C5", "2n", now + 0.6);
+        }
+        
+        function playCorrectSound() {
+            if (!isAudioInitialized) return;
+            const now = Tone.now();
+            synth.triggerAttackRelease(["C5", "E5", "G5"], "8n", now);
+        }
+
+        // --- STREAMING_CHUNK:Implementing core game logic (starting round, drawing questions) ---
+
+        // 取得隨機題目，並從題庫移除確保不重複
+        function drawQuestion() {
+            if (questionBank.length === 0) {
+                return "題庫已耗盡！";
+            }
+            const randomIndex = Math.floor(Math.random() * questionBank.length);
+            const q = questionBank[randomIndex];
+            questionBank.splice(randomIndex, 1); // 移除
+            
+            // 更新首頁題庫剩餘數量顯示
+            document.getElementById('q-remaining').innerText = questionBank.length;
+            
+            return q;
+        }
+
+        // 根據表演科別，推算猜題科別 (循環: 1->2, 2->3, 3->1)
+        function getGuessingTeam(performingTeam) {
+            return (performingTeam % 3) + 1;
+        }
+
+        // 取得科別名稱與顏色
+        function getTeamInfo(teamId) {
+            switch(teamId) {
+                case 1: return { name: '一科', colorClass: 'bg-rose-500', textClass: 'text-rose-500' };
+                case 2: return { name: '二科', colorClass: 'bg-teal-500', textClass: 'text-teal-500' };
+                case 3: return { name: '三科', colorClass: 'bg-indigo-500', textClass: 'text-indigo-500' };
+                default: return { name: '未知', colorClass: 'bg-slate-500', textClass: 'text-slate-500' };
+            }
+        }
+
+        async function startGame(performingTeamId) {
+            // 初始化音效 (必須在使用者互動時觸發)
+            await initAudio();
+
+            currentPerformingTeam = performingTeamId;
+            currentGuessingTeam = getGuessingTeam(performingTeamId);
+            
+            const pInfo = getTeamInfo(currentPerformingTeam);
+            const gInfo = getTeamInfo(currentGuessingTeam);
+
+            // 設定狀態 UI
+            const banner = document.getElementById('round-status-banner');
+            banner.className = `w-full text-center py-3 text-white font-black text-lg shadow-md transition-colors duration-300 ${pInfo.colorClass}`;
+            banner.innerHTML = `${pInfo.name} 表演 <span class="mx-2 opacity-75">➔</span> <span class="text-amber-200">${gInfo.name} 猜題拿分</span>`;
+
+            // 重置回合數據
+            timeLeft = ROUND_TIME;
+            skipsLeft = MAX_SKIPS;
+            isPlaying = true;
+
+            updateTimerDisplay();
+            updateSkipsDisplay();
+            
+            // 抽第一題
+            document.getElementById('current-question').innerText = drawQuestion();
+
+            // 切換畫面
+            document.getElementById('home-view').classList.add('hidden');
+            document.getElementById('game-view').classList.remove('hidden');
+
+            // 啟動計時器
+            clearInterval(timerInterval);
+            timerInterval = setInterval(tick, 1000);
+        }
+
+        // --- STREAMING_CHUNK:Implementing Timer and event handlers ---
+
+        function tick() {
+            if (!isPlaying) return;
+            
+            timeLeft--;
+            updateTimerDisplay();
+
+            if (timeLeft <= 10 && timeLeft > 0) {
+                // 最後 10 秒發出滴滴聲
+                playTickSound();
+                // 讓時間變紅色閃爍感
+                document.getElementById('timer-display').classList.add('text-rose-500');
+            } else {
+                document.getElementById('timer-display').classList.remove('text-rose-500');
+            }
+
+            if (timeLeft <= 0) {
+                endRound(true);
+            }
+        }
+
+        function formatTime(seconds) {
+            const m = Math.floor(seconds / 60).toString().padStart(2, '0');
+            const s = (seconds % 60).toString().padStart(2, '0');
+            return `${m}:${s}`;
+        }
+
+        function updateTimerDisplay() {
+            document.getElementById('timer-display').innerText = formatTime(timeLeft);
+        }
+
+        function updateSkipsDisplay() {
+            const btnSkip = document.getElementById('btn-skip');
+            document.getElementById('skips-display').innerText = `${skipsLeft} 次`;
+            
+            if (skipsLeft <= 0) {
+                btnSkip.disabled = true;
+                document.getElementById('skips-display').classList.replace('bg-amber-50', 'bg-slate-200');
+                document.getElementById('skips-display').classList.replace('text-amber-500', 'text-slate-500');
+            } else {
+                btnSkip.disabled = false;
+                document.getElementById('skips-display').classList.replace('bg-slate-200', 'bg-amber-50');
+                document.getElementById('skips-display').classList.replace('text-slate-500', 'text-amber-500');
+            }
+        }
+
+        function updateScoreBoard() {
+            document.getElementById('score-1').innerText = scores[1];
+            document.getElementById('score-2').innerText = scores[2];
+            document.getElementById('score-3').innerText = scores[3];
+        }
+
+        // 按鈕邏輯
+        function handleCorrect() {
+            if (!isPlaying) return;
+            
+            // 加分給猜題科別
+            scores[currentGuessingTeam]++;
+            playCorrectSound();
+            
+            // 換下一題
+            document.getElementById('current-question').innerText = drawQuestion();
+        }
+
+        function handleSkip() {
+            if (!isPlaying || skipsLeft <= 0) return;
+            
+            skipsLeft--;
+            updateSkipsDisplay();
+            
+            // 換下一題
+            document.getElementById('current-question').innerText = drawQuestion();
+        }
+
+        function handleFoul() {
+            if (!isPlaying) return;
+            // 無痛犯規，不扣分不扣次數，直接換題
+            document.getElementById('current-question').innerText = drawQuestion();
+        }
+
+        // 提早結束邏輯 (自訂 Modal)
+        function requestEndEarly() {
+            document.getElementById('custom-modal').classList.remove('hidden');
+        }
+
+        function closeModal() {
+            document.getElementById('custom-modal').classList.add('hidden');
+        }
+
+        function confirmEndEarly() {
+            closeModal();
+            endRound(false);
+        }
+
+        function endRound(isTimeUp) {
+            isPlaying = false;
+            clearInterval(timerInterval);
+            
+            if (isTimeUp) {
+                playAlarmSound();
+            }
+
+            // 更新首頁記分板
+            updateScoreBoard();
+
+            // 切換回首頁
+            document.getElementById('game-view').classList.add('hidden');
+            document.getElementById('home-view').classList.remove('hidden');
+            
+            // 重置時間顯示顏色
+            document.getElementById('timer-display').classList.remove('text-rose-500');
+        }
+
+        // 初始化確保載入時更新 UI
+        updateScoreBoard();
+        document.getElementById('q-remaining').innerText = questionBank.length;
+
+    </script>
+</body>
+</html>
